@@ -6,50 +6,46 @@ import { ComparisonChatView } from './ComparisonChatView';
 import { ChatSidebar } from './ChatSidebar';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Sparkles } from 'lucide-react';
+import { AVAILABLE_MODELS } from '@/types/chat';
 
-const generateMockResponse = async (modelId, content) => {
-  const responses = {
-    'gpt-4': [
-      "I understand your question. Let me provide a comprehensive analysis...",
-      "Based on my training data, here's what I can tell you: ",
-      "This is an interesting topic. The key points to consider are: ",
-    ],
-    'gpt-4.1': [
-      "Great question! I'll break this down step by step...",
-      "Looking at this from multiple angles, I can see that...",
-      "Here's my detailed response to your query: ",
-    ],
-    'claude-3': [
-      "I'd be happy to help with that. Here's my perspective...",
-      "That's a thoughtful question. Let me explore it thoroughly...",
-      "I'll provide a nuanced answer that considers various factors: ",
-    ],
-    'gemini-pro': [
-      "Analyzing your request... Here's what I found interesting...",
-      "Let me synthesize information from various sources...",
-      "Based on my understanding, here's a comprehensive view: ",
-    ],
-    'mistral-large': [
-      "Excellent question! Here's my take on this...",
-      "I'll approach this systematically. First, let's consider...",
-      "Allow me to provide a detailed explanation: ",
-    ],
-    'llama-3': [
-      "Thanks for asking! Here's what I think about this...",
-      "Let me share my insights on this topic...",
-      "I'll give you a straightforward answer: ",
-    ],
-  };
+/* ================= API ================= */
+const callBackendAPI = async (message, modelId) => {
+  try {
+    const response = await fetch('http://127.0.0.1:5000/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, model: modelId }),
+    });
 
-  const modelResponses = responses[modelId] || responses['gpt-4'];
-  const baseResponse = modelResponses[Math.floor(Math.random() * modelResponses.length)];
-  const fullResponse = `${baseResponse}\n\nRegarding "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}", this is a simulated response demonstrating how ${modelId.toUpperCase()} would respond. In a real implementation, this would connect to the actual API and stream real responses.`;
+    const data = await response.json();
 
-  await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 1200));
+    if (!response.ok) {
+      throw new Error(data.reply || 'Backend error');
+    }
 
-  return fullResponse;
+    return data.reply;
+  } catch (error) {
+    console.error(error);
+    return '❌ Erreur backend';
+  }
 };
 
+/* ================= UTILS ================= */
+const getProvider = (modelId) =>
+  AVAILABLE_MODELS.find(m => m.id === modelId)?.provider;
+
+const isConnectedModel = (modelId) => {
+  const provider = getProvider(modelId);
+  return ['Groq', 'Google', 'OpenRouter', 'Local'].includes(provider);
+};
+
+const generateMockResponse = async (modelId) => {
+  await new Promise(resolve => setTimeout(resolve, 600));
+  return `[Mock Response]
+Le modèle "${modelId}" n’est pas encore connecté à une API réelle.`;
+};
+
+/* ================= COMPONENT ================= */
 export function ChatContainer() {
   const {
     conversations,
@@ -72,91 +68,89 @@ export function ChatContainer() {
 
   const ensureConversation = useCallback(() => {
     if (!activeConversation) {
-      const newId = createConversation('direct');
-      conversationIdRef.current = newId;
-      return newId;
+      const id = createConversation('direct');
+      conversationIdRef.current = id;
+      return id;
     }
     conversationIdRef.current = activeConversationId;
     return activeConversationId;
   }, [activeConversation, activeConversationId, createConversation]);
 
-  const handleModeChange = useCallback((mode) => {
-    const conversationId = ensureConversation();
-    setMode(conversationId, mode);
-  }, [ensureConversation, setMode]);
-
+  /* ========== DIRECT CHAT ========== */
   const handleDirectMessage = useCallback(async (content) => {
     const conversationId = ensureConversation();
-    if (!conversationId) return;
-
     setIsLoading(true);
 
     addMessage(conversationId, { role: 'user', content });
 
-    const modelId = activeConversation?.selectedModel || 'gpt-4';
+    const modelId = activeConversation?.selectedModel || 'grok-3-mini';
 
     try {
-      const response = await generateMockResponse(modelId, content);
-      addMessage(conversationId, { 
-        role: 'assistant', 
-        content: response, 
-        modelId 
+      const response = isConnectedModel(modelId)
+        ? await callBackendAPI(content, modelId)
+        : await generateMockResponse(modelId);
+
+      addMessage(conversationId, {
+        role: 'assistant',
+        content: response,
+        modelId,
       });
-    } catch (error) {
-      console.error('Error generating response:', error);
     } finally {
       setIsLoading(false);
     }
   }, [ensureConversation, addMessage, activeConversation?.selectedModel]);
 
+  /* ========== COMPARISON CHAT ========== */
   const handleComparisonMessage = useCallback(async (content) => {
     const conversationId = ensureConversation();
-    if (!conversationId) return;
-
     setIsLoading(true);
 
-    const leftModelId = activeConversation?.leftModel || 'gpt-4';
-    const rightModelId = activeConversation?.rightModel || 'claude-3';
+    const leftModel = activeConversation?.leftModel || 'grok-3-mini';
+    const rightModel = activeConversation?.rightModel || 'gemini-1.5-pro';
 
-    const compMessage = addComparisonMessage(conversationId, content, null, null);
+    const msg = addComparisonMessage(conversationId, content, null, null);
 
     try {
-      const [leftContent, rightContent] = await Promise.all([
-        generateMockResponse(leftModelId, content),
-        generateMockResponse(rightModelId, content),
+      const [left, right] = await Promise.all([
+        isConnectedModel(leftModel)
+          ? callBackendAPI(content, leftModel)
+          : generateMockResponse(leftModel),
+
+        isConnectedModel(rightModel)
+          ? callBackendAPI(content, rightModel)
+          : generateMockResponse(rightModel),
       ]);
 
-      const leftResponse = {
+      updateComparisonResponse(conversationId, msg.id, 'left', {
         id: `left-${Date.now()}`,
         role: 'assistant',
-        content: leftContent,
-        modelId: leftModelId,
+        content: left,
+        modelId: leftModel,
         timestamp: Date.now(),
-      };
+      });
 
-      const rightResponse = {
+      updateComparisonResponse(conversationId, msg.id, 'right', {
         id: `right-${Date.now()}`,
         role: 'assistant',
-        content: rightContent,
-        modelId: rightModelId,
+        content: right,
+        modelId: rightModel,
         timestamp: Date.now(),
-      };
-
-      updateComparisonResponse(conversationId, compMessage.id, 'left', leftResponse);
-      updateComparisonResponse(conversationId, compMessage.id, 'right', rightResponse);
-    } catch (error) {
-      console.error('Error generating comparison responses:', error);
+      });
     } finally {
       setIsLoading(false);
     }
-  }, [ensureConversation, activeConversation?.leftModel, activeConversation?.rightModel, addComparisonMessage, updateComparisonResponse]);
+  }, [
+    ensureConversation,
+    activeConversation?.leftModel,
+    activeConversation?.rightModel,
+    addComparisonMessage,
+    updateComparisonResponse,
+  ]);
 
   const handleSendMessage = useCallback((content) => {
-    if (activeConversation?.mode === 'comparison') {
-      handleComparisonMessage(content);
-    } else {
-      handleDirectMessage(content);
-    }
+    activeConversation?.mode === 'comparison'
+      ? handleComparisonMessage(content)
+      : handleDirectMessage(content);
   }, [activeConversation?.mode, handleDirectMessage, handleComparisonMessage]);
 
   const currentMode = activeConversation?.mode || 'direct';
@@ -174,21 +168,25 @@ export function ChatContainer() {
       />
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="flex items-center justify-between px-6 py-4 border-b border-border/50 glass-panel">
+        <header className="flex items-center justify-between px-6 py-4 border-b glass-panel">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center theme-transition">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 border flex items-center justify-center">
               <Sparkles className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-foreground">AI Arena</h1>
-              <p className="text-xs text-muted-foreground">Compare & Chat with LLMs</p>
+              <h1 className="text-lg font-semibold">AI Arena</h1>
+              <p className="text-xs text-muted-foreground">
+                Multi-LLM Chat & Comparison
+              </p>
             </div>
           </div>
-          
           <div className="flex items-center gap-3">
             <ModeSelector
               mode={currentMode}
-              onModeChange={handleModeChange}
+              onModeChange={(m) => {
+                const id = ensureConversation();
+                setMode(id, m);
+              }}
             />
             <ThemeToggle />
           </div>
@@ -197,52 +195,27 @@ export function ChatContainer() {
         <main className="flex-1 min-h-0">
           {currentMode === 'comparison' ? (
             <ComparisonChatView
-              conversation={activeConversation || {
-                id: '',
-                title: 'New Chat',
-                mode: 'comparison',
-                messages: [],
-                comparisonMessages: [],
-                selectedModel: null,
-                leftModel: 'gpt-4',
-                rightModel: 'claude-3',
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
-              }}
+              conversation={activeConversation}
               onSendMessage={handleSendMessage}
-              onLeftModelChange={(modelId) => {
+              onLeftModelChange={(m) => {
                 const id = ensureConversation();
-                setComparisonModels(id, modelId, activeConversation?.rightModel || 'claude-3');
+                setComparisonModels(id, m, activeConversation?.rightModel);
               }}
-              onRightModelChange={(modelId) => {
+              onRightModelChange={(m) => {
                 const id = ensureConversation();
-                setComparisonModels(id, activeConversation?.leftModel || 'gpt-4', modelId);
+                setComparisonModels(id, activeConversation?.leftModel, m);
               }}
               isLoading={isLoading}
-              streamingLeftId={null}
-              streamingRightId={null}
             />
           ) : (
             <DirectChatView
-              conversation={activeConversation || {
-                id: '',
-                title: 'New Chat',
-                mode: 'direct',
-                messages: [],
-                comparisonMessages: [],
-                selectedModel: 'gpt-4',
-                leftModel: null,
-                rightModel: null,
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
-              }}
+              conversation={activeConversation}
               onSendMessage={handleSendMessage}
-              onModelChange={(modelId) => {
+              onModelChange={(m) => {
                 const id = ensureConversation();
-                setSelectedModel(id, modelId);
+                setSelectedModel(id, m);
               }}
               isLoading={isLoading}
-              streamingMessageId={null}
             />
           )}
         </main>

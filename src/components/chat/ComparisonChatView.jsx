@@ -26,7 +26,7 @@ export function ComparisonChatView({
         behavior: 'smooth',
       });
     }
-  }, [conversation.comparisonMessages]);
+  }, [conversation?.comparisonMessages]);
 
   const messageRows = conversation.comparisonMessages.map(cm => ({
     id: cm.id,
@@ -43,28 +43,17 @@ export function ComparisonChatView({
       <div className="flex-shrink-0 p-4 border-b border-border/50">
         <div className="grid grid-cols-2 gap-4 max-w-5xl mx-auto">
           <ModelSelector
-            value={conversation.leftModel || 'gpt-4'}
+            value={conversation.leftModel || 'gemini-1.5-pro'}
             onChange={onLeftModelChange}
             excludeModel={conversation.rightModel || undefined}
             label="Left Model"
           />
           <ModelSelector
-            value={conversation.rightModel || 'claude-3'}
+            value={conversation.rightModel || 'grok-3-mini'}
             onChange={onRightModelChange}
             excludeModel={conversation.leftModel || undefined}
             label="Right Model"
           />
-        </div>
-      </div>
-
-      <div className="flex-shrink-0 grid grid-cols-2 gap-0 border-b border-border/30">
-        <div className="flex items-center gap-2 px-4 py-2 border-r border-border/30 bg-secondary/30">
-          <div className="w-2 h-2 rounded-full bg-primary" />
-          <span className="text-sm font-medium">{leftModel?.name || 'Select Model'}</span>
-        </div>
-        <div className="flex items-center gap-2 px-4 py-2 bg-secondary/30">
-          <div className="w-2 h-2 rounded-full bg-accent" />
-          <span className="text-sm font-medium">{rightModel?.name || 'Select Model'}</span>
         </div>
       </div>
 
